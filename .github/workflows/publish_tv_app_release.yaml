@@ -55,7 +55,7 @@ jobs:
     
       # 上传 APK 至 Artifacts
       - name: Upload APK to Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         with:
           name: android_tv
           path: |
