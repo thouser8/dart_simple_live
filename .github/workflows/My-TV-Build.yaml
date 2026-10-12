@@ -67,6 +67,10 @@ jobs:
       #      填中文  = 改成你想要的名字，便于区分两个版本。
       #
       #  注意：值要用英文双引号包起来，引号内不要有多余空格。
+      #
+      #  防重复机制：本步骤会「先把末尾可能已经存在的同名后缀去掉，再追加一次」，
+      #  因此无论源文件里原本是什么状态，最终包名都只会带一个后缀，不会出现
+      #  .my.my 这种叠加；同时会在日志里打印最终包名供核对。
       # -----------------------------------------------------------------------
       - name: 4. 应用自定义设置
         env:
@@ -75,23 +79,27 @@ jobs:
         run: |
           cd simple_live_tv_app
           if [ -n "$APP_ID_SUFFIX" ]; then
-            perl -pi -e 's{(applicationId = ")([^"]*)(")}{${1}${2}$ENV{APP_ID_SUFFIX}${3}}' android/app/build.gradle.kts
-            if grep -qE "applicationId = \"[^\"]*${APP_ID_SUFFIX}\"" android/app/build.gradle.kts; then
-              echo "包名后缀已追加：$APP_ID_SUFFIX"
-              grep -m1 "applicationId = " android/app/build.gradle.kts
-            else
-              echo "错误：修改 applicationId 未生效，已主动停止（不产出可能装错的安装包）"
+            perl -pi -e 's{(applicationId = ")([^"]*)(")}{my $v=$2; my $s=$ENV{APP_ID_SUFFIX}; $v=~s/(?:\Q$s\E)+\z//; $1.$v.$s.$3}e' android/app/build.gradle.kts
+            VALUE=$(sed -n 's/^[[:space:]]*applicationId = "\(.*\)"[[:space:]]*$/\1/p' android/app/build.gradle.kts | head -1)
+            echo "最终包名：${VALUE:-（未找到）}"
+            if [ -z "$VALUE" ]; then
+              echo "错误：未找到 applicationId，已主动停止"
               exit 1
             fi
+            case "$VALUE" in
+              *"$APP_ID_SUFFIX") echo "后缀核对无误（只追加了一次）" ;;
+              *) echo "错误：包名不以 $APP_ID_SUFFIX 结尾，已主动停止（不产出可能装错的安装包）"
+                 exit 1 ;;
+            esac
           else
             echo "包名保持原样（未做修改）"
           fi
           if [ -n "$APP_LABEL" ]; then
             perl -pi -e 's{android:label="[^"]*"}{android:label="$ENV{APP_LABEL}"}' android/app/src/main/AndroidManifest.xml
-            if grep -qF "android:label=\"$APP_LABEL\"" android/app/src/main/AndroidManifest.xml; then
-              echo "显示名已改为：$APP_LABEL"
-            else
-              echo "错误：修改 android:label 未生效，已主动停止"
+            VALUE=$(sed -n 's/.*android:label="\(.*\)".*/\1/p' android/app/src/main/AndroidManifest.xml | head -1)
+            echo "最终显示名：${VALUE:-（未找到）}"
+            if [ "$VALUE" != "$APP_LABEL" ]; then
+              echo "错误：显示名未能按预期修改，已主动停止"
               exit 1
             fi
           else
