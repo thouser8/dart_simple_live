@@ -1,0 +1,137 @@
+# =============================================================================
+#  My TV Build —— 你自己维护的 Android TV 打包流程
+#
+#  为什么用它：
+#    这个文件在作者仓库里不存在，完全属于你自己。以后无论怎么点
+#    "Sync fork" 同步上游更新，都不会跟它冲突，你不需要再手动改任何东西。
+#    作者仓库里的 publish_tv_app_release.yaml 请忽略，不要再使用。
+#
+#  用法：
+#    Actions → 左侧选 "My TV Build (用这个)" → Run workflow
+#
+#  需要的 4 个仓库密钥（Settings → Secrets and variables → Actions）：
+#    TV_KEYSTORE_BASE64 / TV_STORE_PASSWORD / TV_KEY_PASSWORD / TV_KEY_ALIAS
+#    这四个值在你本机的「密钥信息与填写清单.txt」里。
+#
+#  想改成自己的包名 / 显示名：见下面「应用自定义设置」那一步的两个值。
+# =============================================================================
+name: My TV Build (用这个)
+
+# 只能手动触发，不会因为同步上游而自动乱跑
+on:
+  workflow_dispatch:
+
+# 允许把安装包发布到本仓库的 Releases 页面
+permissions:
+  contents: write
+
+jobs:
+  build-tv:
+    runs-on: macos-latest
+    steps:
+      - name: 1. 签出代码
+        uses: actions/checkout@v7
+        with:
+          ref: master
+
+      - name: 2. 还原签名文件
+        id: keystore
+        uses: timheuer/base64-to-file@v1.2
+        with:
+          fileName: keystore.jks
+          encodedString: ${{ secrets.TV_KEYSTORE_BASE64 }}
+
+      - name: 3. 写入 key.properties
+        run: |
+          echo "storeFile=${{ steps.keystore.outputs.filePath }}" > simple_live_tv_app/android/key.properties
+          echo "storePassword=${{ secrets.TV_STORE_PASSWORD }}" >> simple_live_tv_app/android/key.properties
+          echo "keyPassword=${{ secrets.TV_KEY_PASSWORD }}" >> simple_live_tv_app/android/key.properties
+          echo "keyAlias=${{ secrets.TV_KEY_ALIAS }}" >> simple_live_tv_app/android/key.properties
+
+      # -----------------------------------------------------------------------
+      #  自定义设置 —— 两个值都留空 "" 时，本步骤不做任何修改（最省事）
+      #
+      #   APP_ID_SUFFIX：
+      #      留空 ""  = 不改包名，装上去会直接覆盖官方版。
+      #      填 ".my"  = 包名变成 com.xycz.simple_live_tv.my，
+      #                 可与官方版同时安装共存（但 App 内数据从零开始）。
+      #
+      #   APP_LABEL：
+      #      留空 ""  = 电视桌面上的名字保持 "Simple Live TV"。
+      #      填中文  = 改成你想要的名字，便于区分两个版本。
+      #
+      #  注意：值要用英文双引号包起来，引号内不要有多余空格。
+      # -----------------------------------------------------------------------
+      - name: 4. 应用自定义设置
+        env:
+          APP_ID_SUFFIX: ""
+          APP_LABEL: ""
+        run: |
+          cd simple_live_tv_app
+          if [ -n "$APP_ID_SUFFIX" ]; then
+            perl -pi -e 's{(applicationId = "com\.xycz\.simple_live_tv)"}{${1}$ENV{APP_ID_SUFFIX}"}' android/app/build.gradle.kts
+            grep -qF "com.xycz.simple_live_tv$APP_ID_SUFFIX" android/app/build.gradle.kts
+            echo "包名已改为：com.xycz.simple_live_tv$APP_ID_SUFFIX"
+          else
+            echo "包名保持原样（未做修改）"
+          fi
+          if [ -n "$APP_LABEL" ]; then
+            perl -pi -e 's{android:label="[^"]*"}{android:label="$ENV{APP_LABEL}"}' android/app/src/main/AndroidManifest.xml
+            echo "显示名已改为：$APP_LABEL"
+          else
+            echo "显示名保持原样（未做修改）"
+          fi
+
+      - name: 5. 设置 Java 环境
+        uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: "17"
+          cache: gradle
+
+      - name: 6. 设置 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: simple_live_tv_app/pubspec.yaml
+          cache: true
+
+      - name: 7. 安装依赖
+        run: |
+          cd simple_live_tv_app
+          flutter pub get
+
+      - name: 8. 编译 APK
+        run: |
+          cd simple_live_tv_app
+          flutter build apk --release --split-per-abi
+
+      - name: 9. 保存到 Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: android_tv
+          path: |
+            simple_live_tv_app/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            simple_live_tv_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            simple_live_tv_app/build/app/outputs/flutter-apk/app-x86_64-release.apk
+
+      - name: 10. 读取版本号
+        id: version
+        uses: juliangruber/read-file-action@v1
+        with:
+          path: assets/tv_app_version.json
+
+      - name: 11. 发布到 Releases
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: "tv_v${{ fromJson(steps.version.outputs.content).version }}"
+          name: "TV ${{ fromJson(steps.version.outputs.content).version }}"
+          body: |
+            # Android TV
+            ${{ fromJson(steps.version.outputs.content).version_desc }}
+          prerelease: ${{ fromJson(steps.version.outputs.content).prerelease }}
+          overwrite_files: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            simple_live_tv_app/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            simple_live_tv_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            simple_live_tv_app/build/app/outputs/flutter-apk/app-x86_64-release.apk
