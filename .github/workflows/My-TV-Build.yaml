@@ -14,6 +14,8 @@
 #    这四个值在你本机的「密钥信息与填写清单.txt」里。
 #
 #  想改成自己的包名 / 显示名：见下面「应用自定义设置」那一步的两个值。
+#    只需设置一次，之后永久生效 —— 因为同步上游永远不会动这个文件，
+#    所以以后每次打包前都不需要再重新填写。
 # =============================================================================
 name: My TV Build (用这个)
 
@@ -49,12 +51,16 @@ jobs:
           echo "keyAlias=${{ secrets.TV_KEY_ALIAS }}" >> simple_live_tv_app/android/key.properties
 
       # -----------------------------------------------------------------------
-      #  自定义设置 —— 两个值都留空 "" 时，本步骤不做任何修改（最省事）
+      #  自定义设置 —— 只需要在这里设置一次，之后永久生效。
+      #
+      #  重要：这个文件是你自己新建的，作者仓库里没有它。
+      #        所以 Sync fork（同步上游）永远不会改动它 —— 你在下面写定的值
+      #        会一直保留，不需要在每次同步后重新填写。
       #
       #   APP_ID_SUFFIX：
-      #      留空 ""  = 不改包名，装上去会直接覆盖官方版。
-      #      填 ".my"  = 包名变成 com.xycz.simple_live_tv.my，
-      #                 可与官方版同时安装共存（但 App 内数据从零开始）。
+      #      留空 ""  = 不改包名，装上去会直接覆盖官方版（与原版同包名）。
+      #      填 ".my"  = 在原包名后追加 .my，可与官方版同时安装共存
+      #                 （App 内数据从零开始，需重新登录）。
       #
       #   APP_LABEL：
       #      留空 ""  = 电视桌面上的名字保持 "Simple Live TV"。
@@ -64,20 +70,30 @@ jobs:
       # -----------------------------------------------------------------------
       - name: 4. 应用自定义设置
         env:
-          APP_ID_SUFFIX: ""
-          APP_LABEL: ""
+          APP_ID_SUFFIX: ".my"
+          APP_LABEL: "Simple Live TV 自建版"
         run: |
           cd simple_live_tv_app
           if [ -n "$APP_ID_SUFFIX" ]; then
-            perl -pi -e 's{(applicationId = "com\.xycz\.simple_live_tv)"}{${1}$ENV{APP_ID_SUFFIX}"}' android/app/build.gradle.kts
-            grep -qF "com.xycz.simple_live_tv$APP_ID_SUFFIX" android/app/build.gradle.kts
-            echo "包名已改为：com.xycz.simple_live_tv$APP_ID_SUFFIX"
+            perl -pi -e 's{(applicationId = ")([^"]*)(")}{${1}${2}$ENV{APP_ID_SUFFIX}${3}}' android/app/build.gradle.kts
+            if grep -qE "applicationId = \"[^\"]*${APP_ID_SUFFIX}\"" android/app/build.gradle.kts; then
+              echo "包名后缀已追加：$APP_ID_SUFFIX"
+              grep -m1 "applicationId = " android/app/build.gradle.kts
+            else
+              echo "错误：修改 applicationId 未生效，已主动停止（不产出可能装错的安装包）"
+              exit 1
+            fi
           else
             echo "包名保持原样（未做修改）"
           fi
           if [ -n "$APP_LABEL" ]; then
             perl -pi -e 's{android:label="[^"]*"}{android:label="$ENV{APP_LABEL}"}' android/app/src/main/AndroidManifest.xml
-            echo "显示名已改为：$APP_LABEL"
+            if grep -qF "android:label=\"$APP_LABEL\"" android/app/src/main/AndroidManifest.xml; then
+              echo "显示名已改为：$APP_LABEL"
+            else
+              echo "错误：修改 android:label 未生效，已主动停止"
+              exit 1
+            fi
           else
             echo "显示名保持原样（未做修改）"
           fi
