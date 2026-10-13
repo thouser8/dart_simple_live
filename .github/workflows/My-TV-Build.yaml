@@ -27,14 +27,33 @@ on:
 permissions:
   contents: write
 
+# -----------------------------------------------------------------------------
+#  代码来源 —— 本脚本每次运行都会"直接向作者仓库取最新代码"，
+#  所以你不需要手动同步，也不会用到你自己仓库里那份旧代码。
+#
+#  为什么要这样：TV 版一直在作者的 dev 分支上开发，master 分支里的 TV 部分
+#  自 2026 年 2 月起就不再更新了。而且 TV 工程用的是"路径依赖"
+#  （simple_live_core: path: ../simple_live_core），TV 代码必须和同一分支的
+#  core 代码配套，所以必须整棵分支一起取，不能只挑 TV 这个文件夹。
+#
+#    SOURCE_REF: dev      → 打包作者 dev 分支的 TV 版（最新功能，偶尔可能编译失败）
+#    SOURCE_REF: master   → 打包作者 master 分支的 TV 版（较旧但稳定）
+#
+#  想切换时，把下面的 dev 改成 master（或改回来）保存即可，下次运行生效。
+# -----------------------------------------------------------------------------
+env:
+  SOURCE_REPO: SlotSun/dart_simple_live
+  SOURCE_REF: dev
+
 jobs:
   build-tv:
     runs-on: macos-latest
     steps:
-      - name: 1. 签出代码
+      - name: 1. 签出源码（自动取作者最新）
         uses: actions/checkout@v7
         with:
-          ref: master
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_REF }}
 
       - name: 2. 还原签名文件
         id: keystore
@@ -52,10 +71,6 @@ jobs:
 
       # -----------------------------------------------------------------------
       #  自定义设置 —— 只需要在这里设置一次，之后永久生效。
-      #
-      #  重要：这个文件是你自己新建的，作者仓库里没有它。
-      #        所以 Sync fork（同步上游）永远不会改动它 —— 你在下面写定的值
-      #        会一直保留，不需要在每次同步后重新填写。
       #
       #   APP_ID_SUFFIX：
       #      留空 ""  = 不改包名，装上去会直接覆盖官方版（与原版同包名）。
@@ -147,6 +162,7 @@ jobs:
       - name: 11. 发布到 Releases
         uses: softprops/action-gh-release@v3
         with:
+          repository: ${{ github.repository }}
           tag_name: "tv_v${{ fromJson(steps.version.outputs.content).version }}"
           name: "TV ${{ fromJson(steps.version.outputs.content).version }}"
           body: |
