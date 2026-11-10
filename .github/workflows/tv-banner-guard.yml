@@ -1,0 +1,72 @@
+name: TV banner guard
+
+# 目的：守护 Android TV 横幅资源的正确形态。
+# 背景：android:banner 若指向 adaptive-icon（mipmap-anydpi-v26/ic_banner.xml），
+#      电视桌面会把方形图标塞进长方形框里。本工作流在每次提交时校验，
+#      一旦该项修复被覆盖或误删，CI 立即失败，避免静默退回旧样子。
+#
+# 本文件自包含，不依赖仓库内任何脚本，便于纯网页操作。
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check-banner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验横幅资源形态
+        run: |
+          python3 - <<'PY'
+          import struct, sys, pathlib
+
+          res = pathlib.Path("simple_live_tv_app/android/app/src/main/res")
+          expect = {"mdpi": (160, 90), "hdpi": (240, 135), "xhdpi": (320, 180),
+                    "xxhdpi": (480, 270), "xxxhdpi": (640, 360)}
+          errs = []
+
+          # 1. 不得存在 adaptive-icon 形式（问题根因）
+          bad = res / "mipmap-anydpi-v26" / "ic_banner.xml"
+          if bad.exists():
+              errs.append(f"{bad} 存在：adaptive-icon 会导致方形图标套长方框，请删除该文件")
+
+          # 2. 五档密度位图必须存在、尺寸正确、比例为 16:9
+          for d, (ew, eh) in expect.items():
+              p = res / f"mipmap-{d}" / "ic_banner.png"
+              if not p.is_file():
+                  errs.append(f"{p} 缺失")
+                  continue
+              head = p.read_bytes()[:33]
+              if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n":
+                  errs.append(f"{p} 不是有效 PNG")
+                  continue
+              w, h = struct.unpack(">II", head[16:24])
+              if (w, h) != (ew, eh):
+                  errs.append(f"{p} 尺寸为 {w}x{h}，应为 {ew}x{eh}")
+              elif abs(w / h - 16 / 9) > 0.02:
+                  errs.append(f"{p} 不是 16:9")
+
+          # 3. 若保留 tools/tv_banner/res 单一真源，则 android 下副本必须与之一致
+          tools_res = pathlib.Path("simple_live_tv_app/tools/tv_banner/res")
+          if tools_res.is_dir():
+              for d in expect:
+                  a = tools_res / f"mipmap-{d}" / "ic_banner.png"
+                  b = res / f"mipmap-{d}" / "ic_banner.png"
+                  if a.is_file() and b.is_file() and a.read_bytes() != b.read_bytes():
+                      errs.append(f"mipmap-{d} 的副本与 tools/tv_banner/res 不一致，请重新同步")
+
+          # 4. 清单必须声明 android:banner
+          mf = pathlib.Path("simple_live_tv_app/android/app/src/main/AndroidManifest.xml")
+          if mf.is_file() and 'android:banner="@mipmap/ic_banner"' not in mf.read_text(encoding="utf-8"):
+              errs.append("AndroidManifest.xml 缺少 android:banner=\"@mipmap/ic_banner\"")
+
+          if errs:
+              print("TV 横幅校验未通过：")
+              for e in errs:
+                  print(" -", e)
+              sys.exit(1)
+          print("TV 横幅校验通过：5 档 16:9 位图齐备，无 adaptive-icon，清单声明正确。")
+          PY
