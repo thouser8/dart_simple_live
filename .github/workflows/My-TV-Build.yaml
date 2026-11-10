@@ -56,28 +56,56 @@ jobs:
           ref: ${{ env.SOURCE_REF }}
 
       # -----------------------------------------------------------------------
-      #  TV 横幅修正 —— 必须在编译前执行
+      #  TV 图标修正 —— 必须在上游代码签出之后、编译之前执行
       #
-      #  为什么需要：上面第 1 步签出的是「上游作者仓库」，不包含本仓库里
-      #  对 ic_banner 的修改。若不在此处覆盖，打出来的包仍是旧图标 ——
-      #  电视桌面会显示成「长方形里套一个带白边的正方形」。
-      #
-      #  图源：本仓库 master 分支上的 5 张 16:9 横幅（单一真源）。
-      #  以后想换图，改本仓库里的图片即可，本步骤自动生效。
+      #  为什么需要：第 1 步签出的是「上游作者仓库」，不含本仓库对图标的修改。
+      #  这里把 TCL 桌面判定「满幅图块」可能依赖的条件一次性补齐：
+      #    ① 五档 16:9 横幅铺进 mipmap（xhdpi = 320x180，Android TV 官方基准）
+      #    ② 同一张图再放一份到 drawable/banner（部分桌面按该名字读取）
+      #    ③ 删除 adaptive-icon（它会把方图标塞进长方形）
+      #    ④ 清单补 leanback / touchscreen 声明（TV 应用标志，当前上游没有）
+      #    ⑤ versionCode +1，避免桌面沿用旧图标缓存
       # -----------------------------------------------------------------------
-      - name: 1.5 应用 TV 横幅修正（覆盖上游旧图标）
+      - name: 1.5 应用 TV 图标修正
         run: |
           set -e
           BASE="https://raw.githubusercontent.com/thouser8/dart_simple_live/master/simple_live_tv_app/android/app/src/main/res"
-          RES="simple_live_tv_app/android/app/src/main/res"
+          APP="simple_live_tv_app"
+          RES="$APP/android/app/src/main/res"
+          MF="$APP/android/app/src/main/AndroidManifest.xml"
+
+          echo "① 铺五档 16:9 横幅"
           for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
             mkdir -p "$RES/mipmap-$d"
             curl -fsSL "$BASE/mipmap-$d/ic_banner.png" -o "$RES/mipmap-$d/ic_banner.png"
-            echo "  覆盖 mipmap-$d/ic_banner.png  $(wc -c < "$RES/mipmap-$d/ic_banner.png") 字节"
+            echo "   mipmap-$d/ic_banner.png  $(wc -c < "$RES/mipmap-$d/ic_banner.png") 字节"
           done
+
+          echo "② 额外提供 drawable/banner"
+          mkdir -p "$RES/drawable-xhdpi" "$RES/drawable-nodpi"
+          cp "$RES/mipmap-xhdpi/ic_banner.png"   "$RES/drawable-xhdpi/banner.png"
+          cp "$RES/mipmap-xxxhdpi/ic_banner.png" "$RES/drawable-nodpi/banner.png"
+          echo "   drawable-xhdpi/banner.png + drawable-nodpi/banner.png"
+
+          echo "③ 移除 adaptive-icon"
           rm -f "$RES/mipmap-anydpi-v26/ic_banner.xml"
-          echo "  已移除 adaptive-icon: mipmap-anydpi-v26/ic_banner.xml"
-          echo "横幅修正完成"
+
+          echo "④ 清单：banner 指向 drawable/banner，并补 TV 声明"
+          perl -pi -e 's{android:banner="\@mipmap/ic_banner"}{android:banner="\@drawable/banner"}g' "$MF"
+          if ! grep -q 'android.software.leanback' "$MF"; then
+            perl -0pi -e 's{(<application)}{    <uses-feature android:name="android.software.leanback" android:required="false"/>\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>\n\n    $1}' "$MF"
+            echo "   已补充 uses-feature: leanback / touchscreen"
+          else
+            echo "   已存在 uses-feature，跳过"
+          fi
+
+          echo "⑤ versionCode +1（破缓存）"
+          perl -pi -e 'if (/^version:/s*[/d.]+/+(/d+)/) { my $n=$1+1; s/\+(\d+)/\+$n/ }' "$APP/pubspec.yaml"
+          grep -m1 '^version:' "$APP/pubspec.yaml" || true
+
+          echo "---- 结果校验 ----"
+          grep -m3 'android:banner' "$MF" || echo "警告：清单中未找到 android:banner，第 ④ 步未生效"
+          ls -l "$RES/drawable-xhdpi/banner.png" "$RES/drawable-nodpi/banner.png"
 
 
       - name: 2. 还原签名文件
