@@ -55,6 +55,31 @@ jobs:
           repository: ${{ env.SOURCE_REPO }}
           ref: ${{ env.SOURCE_REF }}
 
+      # -----------------------------------------------------------------------
+      #  TV 横幅修正 —— 必须在编译前执行
+      #
+      #  为什么需要：上面第 1 步签出的是「上游作者仓库」，不包含本仓库里
+      #  对 ic_banner 的修改。若不在此处覆盖，打出来的包仍是旧图标 ——
+      #  电视桌面会显示成「长方形里套一个带白边的正方形」。
+      #
+      #  图源：本仓库 master 分支上的 5 张 16:9 横幅（单一真源）。
+      #  以后想换图，改本仓库里的图片即可，本步骤自动生效。
+      # -----------------------------------------------------------------------
+      - name: 1.5 应用 TV 横幅修正（覆盖上游旧图标）
+        run: |
+          set -e
+          BASE="https://raw.githubusercontent.com/thouser8/dart_simple_live/master/simple_live_tv_app/android/app/src/main/res"
+          RES="simple_live_tv_app/android/app/src/main/res"
+          for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            mkdir -p "$RES/mipmap-$d"
+            curl -fsSL "$BASE/mipmap-$d/ic_banner.png" -o "$RES/mipmap-$d/ic_banner.png"
+            echo "  覆盖 mipmap-$d/ic_banner.png  $(wc -c < "$RES/mipmap-$d/ic_banner.png") 字节"
+          done
+          rm -f "$RES/mipmap-anydpi-v26/ic_banner.xml"
+          echo "  已移除 adaptive-icon: mipmap-anydpi-v26/ic_banner.xml"
+          echo "横幅修正完成"
+
+
       - name: 2. 还原签名文件
         id: keystore
         uses: timheuer/base64-to-file@v1.2
