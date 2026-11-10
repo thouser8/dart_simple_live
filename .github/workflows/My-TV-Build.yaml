@@ -69,6 +69,7 @@ jobs:
       - name: 1.5 应用 TV 图标修正
         run: |
           set -e
+          trap 'echo "::error::第 1.5 步在第 $LINENO 行失败，请把上面几行日志发给我"' ERR
           BASE="https://raw.githubusercontent.com/thouser8/dart_simple_live/master/simple_live_tv_app/android/app/src/main/res"
           APP="simple_live_tv_app"
           RES="$APP/android/app/src/main/res"
@@ -77,7 +78,10 @@ jobs:
           echo "① 铺五档 16:9 横幅"
           for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
             mkdir -p "$RES/mipmap-$d"
-            curl -fsSL "$BASE/mipmap-$d/ic_banner.png" -o "$RES/mipmap-$d/ic_banner.png"
+            if ! curl -fsSL --retry 3 --retry-delay 2 "$BASE/mipmap-$d/ic_banner.png" -o "$RES/mipmap-$d/ic_banner.png"; then
+              echo "::error::拉取 mipmap-$d/ic_banner.png 失败：本仓库 master 分支上该文件不存在。同步上游会用作者的原图覆盖它，需要重新上传一次横幅图片。"
+              exit 1
+            fi
             echo "   mipmap-$d/ic_banner.png  $(wc -c < "$RES/mipmap-$d/ic_banner.png") 字节"
           done
 
@@ -89,22 +93,56 @@ jobs:
 
           echo "③ 移除 adaptive-icon"
           rm -f "$RES/mipmap-anydpi-v26/ic_banner.xml"
-
-          echo "④ 清单：banner 指向 drawable/banner，并补 TV 声明"
-          perl -pi -e 's{android:banner="\@mipmap/ic_banner"}{android:banner="\@drawable/banner"}g' "$MF"
-          if ! grep -q 'android.software.leanback' "$MF"; then
-            perl -0pi -e 's{(<application)}{    <uses-feature android:name="android.software.leanback" android:required="false"/>\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>\n\n    $1}' "$MF"
-            echo "   已补充 uses-feature: leanback / touchscreen"
-          else
-            echo "   已存在 uses-feature，跳过"
+          if [ -f "$RES/mipmap-anydpi-v26/ic_banner.xml" ]; then
+            echo "::error::adaptive-icon 未能删除，桌面仍会把方图塞进长方形"
+            exit 1
           fi
 
+          echo "④ 清单：banner 指向 drawable/banner，并补 TV 声明"
+          if ! command -v python3 >/dev/null 2>&1; then
+            echo "::error::运行环境缺少 python3，无法修改清单"
+            exit 1
+          fi
+          cat > /tmp/fix_manifest.py <<'PYEOF'
+          import io, re, sys
+          p = sys.argv[1]
+          s = io.open(p, encoding="utf-8").read()
+          hits = s.count('android:banner="@mipmap/ic_banner"')
+          s = s.replace('android:banner="@mipmap/ic_banner"',
+                        'android:banner="@drawable/banner"')
+          added = False
+          if "android.software.leanback" not in s:
+              feats = ('<uses-feature android:name="android.software.leanback" android:required="false"/>\n'
+                       '    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>\n\n'
+                       '    ')
+              s, n = re.subn(r"<application", feats + "<application", s, count=1)
+              added = n > 0
+          io.open(p, "w", encoding="utf-8", newline="").write(s)
+          print("   banner 属性改写 %d 处" % hits)
+          print("   uses-feature 补充: %s" % ("是" if added else "已存在，跳过"))
+          if hits == 0:
+              sys.exit("清单里没有 android:banner=@mipmap/ic_banner 可改")
+          PYEOF
+          python3 /tmp/fix_manifest.py "$MF"
+
           echo "⑤ versionCode +1（破缓存）"
-          perl -pi -e 'if (/^version:/s*[/d.]+/+(/d+)/) { my $n=$1+1; s/\+(\d+)/\+$n/ }' "$APP/pubspec.yaml"
-          grep -m1 '^version:' "$APP/pubspec.yaml" || true
+          cat > /tmp/bump_version.py <<'PYEOF'
+          import io, re, sys
+          p = sys.argv[1]
+          s = io.open(p, encoding="utf-8").read()
+          m = re.search(r"^version:[ \t]*([\d.]+)\+(\d+)[ \t]*$", s, re.M)
+          if not m:
+              sys.exit("pubspec.yaml 中未找到 version: X.Y.Z+N 形式")
+          new = "version: %s+%d" % (m.group(1), int(m.group(2)) + 1)
+          s = s[:m.start()] + new + s[m.end():]
+          io.open(p, "w", encoding="utf-8", newline="").write(s)
+          print("   %s  ->  %s" % (m.group(0), new))
+          PYEOF
+          python3 /tmp/bump_version.py "$APP/pubspec.yaml"
 
           echo "---- 结果校验 ----"
-          grep -m3 'android:banner' "$MF" || echo "警告：清单中未找到 android:banner，第 ④ 步未生效"
+          grep -m3 'android:banner' "$MF" || true
+          grep -m2 'uses-feature' "$MF" || true
           ls -l "$RES/drawable-xhdpi/banner.png" "$RES/drawable-nodpi/banner.png"
 
 
