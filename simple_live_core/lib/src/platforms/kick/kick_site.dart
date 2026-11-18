@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:dio/dio.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 import 'package:simple_live_core/src/common/http_client.dart';
 import 'package:simple_live_core/src/model/account_info.dart';
@@ -31,13 +32,80 @@ class KickSite implements LiveSite {
   static const baseApiUrl = "https://kick.com/api/v2";
 
   /// 请求 Kick 接口用的头。Kick 前面有 Cloudflare，缺 UA / Referer 容易被拦。
+  ///
+  /// 除了 UA，还要带上与 UA 自洽的 Client Hints（sec-ch-ua 系列）。
+  /// Cloudflare 会把「UA 说自己是 Chrome，却不发 Client Hints」判为脚本流量直接 403。
   Map<String, String> headers = {
     'user-agent': defaultUa,
     'accept': 'application/json, text/plain, */*',
     'accept-language': 'en-US,en;q=0.9',
     'referer': baseUrl + "/",
     'origin': baseUrl,
+    'sec-ch-ua':
+        '"Google Chrome";v="137", "Chromium";v="137", "Not/A)Brand";v="24"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+    'priority': 'u=1, i',
   };
+
+  /// 统一请求：非 2xx 时把服务端返回的正文塞进异常。
+  ///
+  /// 这里故意用 `statusCode: 0`，因为 `CoreError.toString()` 在 statusCode 不为 0 时
+  /// 只会输出「无权限访问资源(403)」这种固定文案，会把诊断信息吞掉。
+  Future<dynamic> _request(
+    String url, {
+    required String method,
+    Map<String, dynamic>? query,
+    Map<String, String>? header,
+    Object? data,
+  }) async {
+    Response<dynamic> resp;
+    try {
+      resp = await HttpClient.instance.dio.request(
+        url,
+        data: data,
+        queryParameters: query,
+        options: Options(
+          method: method,
+          responseType: ResponseType.json,
+          headers: Map<String, String>.from(header ?? headers),
+          validateStatus: (_) => true,
+        ),
+      );
+    } on DioException catch (e) {
+      throw CoreError("Kick 请求 $url 失败：${e.type.name} ${e.message}");
+    }
+
+    var code = resp.statusCode ?? 0;
+    if (code >= 200 && code < 300) {
+      return resp.data;
+    }
+    throw CoreError(
+      "Kick 接口返回 $code：${_snippet(resp.data)}  ← $url",
+    );
+  }
+
+  /// 把响应正文压成一行短文本，避免刷屏
+  static String _snippet(dynamic data) {
+    String text;
+    if (data is String) {
+      text = data;
+    } else {
+      try {
+        text = jsonEncode(data);
+      } catch (_) {
+        text = data.toString();
+      }
+    }
+    text = text.replaceAll(RegExp(r"\s+"), " ").trim();
+    if (text.length > 400) {
+      return "${text.substring(0, 400)}…";
+    }
+    return text;
+  }
 
   /// 请求 m3u8 用的头
   Map<String, String> get streamHeaders => {
@@ -87,8 +155,9 @@ class KickSite implements LiveSite {
     required String chatroomId,
     String cookie = "",
   }) async {
-    var response = await HttpClient.instance.postJson(
+    var response = await _request(
       "$realtimeBaseUrl/realtime/channels/$chatroomId/chat/connection",
+      method: "POST",
       data: {
         "client": {
           "id": _clientId(),
@@ -101,13 +170,10 @@ class KickSite implements LiveSite {
         }
       },
       header: {
-        'user-agent': defaultUa,
-        'accept': 'application/json, text/plain, */*',
-        'accept-language': 'en-US,en;q=0.9',
+        ...headers,
         'content-type': 'application/json',
         'x-app-platform': 'web',
-        'referer': "$baseUrl/",
-        'origin': baseUrl,
+        'sec-fetch-site': 'same-site',
         if (cookie.isNotEmpty) 'cookie': cookie,
       },
     );
@@ -141,10 +207,26 @@ class KickSite implements LiveSite {
 
   /// 读取频道详情（原始数据）
   Future<KickChannel> getChannel(String slug) async {
-    var response = await HttpClient.instance.getJson(
-      "$baseApiUrl/channels/$slug",
-      header: headers,
-    );
+    dynamic response;
+    try {
+      response = await _request(
+        "$baseApiUrl/channels/$slug",
+        method: "GET",
+        header: headers,
+      );
+    } on CoreError catch (e) {
+      // 403 时换主域再试一次：Kick 对裸域和 www 的 Cloudflare 规则偶尔不一致
+      if (e.message.contains("返回 403") || e.message.contains("返回 1020")) {
+        CoreLog.w("kick 裸域被拦，改用 www.kick.com 重试");
+        response = await _request(
+          "https://www.kick.com/api/v2/channels/$slug",
+          method: "GET",
+          header: headers,
+        );
+      } else {
+        rethrow;
+      }
+    }
     if (response is! Map) {
       throw Exception("Kick 频道数据解析失败：$slug");
     }
@@ -329,9 +411,10 @@ class KickSite implements LiveSite {
     if (keyword.trim().isEmpty) {
       return LiveSearchAnchorResult(hasMore: false, items: <LiveAnchorItem>[]);
     }
-    var response = await HttpClient.instance.getJson(
+    var response = await _request(
       "$baseUrl/api/search",
-      queryParameters: {"searched_word": keyword.trim()},
+      method: "GET",
+      query: {"searched_word": keyword.trim()},
       header: headers,
     );
     var items = <LiveAnchorItem>[];
