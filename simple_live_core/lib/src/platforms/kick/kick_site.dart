@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:simple_live_core/simple_live_core.dart';
+import 'package:simple_live_core/src/common/core_error.dart';
 import 'package:simple_live_core/src/common/http_client.dart';
 import 'package:simple_live_core/src/model/account_info.dart';
 import 'package:simple_live_core/src/model/account_qr_code.dart';
@@ -35,7 +36,7 @@ class KickSite implements LiveSite {
   ///
   /// 除了 UA，还要带上与 UA 自洽的 Client Hints（sec-ch-ua 系列）。
   /// Cloudflare 会把「UA 说自己是 Chrome，却不发 Client Hints」判为脚本流量直接 403。
-  Map<String, String> headers = {
+  static Map<String, String> get headers => {
     'user-agent': defaultUa,
     'accept': 'application/json, text/plain, */*',
     'accept-language': 'en-US,en;q=0.9',
@@ -55,7 +56,7 @@ class KickSite implements LiveSite {
   ///
   /// 这里故意用 `statusCode: 0`，因为 `CoreError.toString()` 在 statusCode 不为 0 时
   /// 只会输出「无权限访问资源(403)」这种固定文案，会把诊断信息吞掉。
-  Future<dynamic> _request(
+  static Future<dynamic> _request(
     String url, {
     required String method,
     Map<String, dynamic>? query,
