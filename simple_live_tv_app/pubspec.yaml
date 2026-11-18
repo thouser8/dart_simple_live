@@ -53,6 +53,13 @@ dependencies:
   media_kit_video: ^1.3.1
   media_kit_libs_video: ^1.0.7
 
+  # Kick 接口有浏览器指纹风控，需要 WebView 内核发请求（隐藏页面，不显示）
+  flutter_inappwebview:
+    git:
+      url: https://github.com/guide-inc-org/guide-flutter_inappwebview.git
+      path: flutter_inappwebview
+      ref: sbi_fx_pc/v6.2.0-beta.3
+
 dependency_overrides:
   fading_edge_scrollview: ^4.1.1
 

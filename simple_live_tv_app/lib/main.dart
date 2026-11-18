@@ -20,6 +20,7 @@ import 'package:simple_live_tv_app/routes/app_pages.dart';
 import 'package:simple_live_tv_app/routes/route_path.dart';
 import 'package:simple_live_tv_app/services/db_service.dart';
 import 'package:simple_live_tv_app/services/follow_user_service.dart';
+import 'package:simple_live_tv_app/services/kick_web_fetcher.dart';
 import 'package:simple_live_tv_app/services/local_storage_service.dart';
 import 'package:simple_live_tv_app/services/migration_service.dart';
 import 'package:simple_live_tv_app/services/platform_service.dart';
@@ -31,6 +32,8 @@ void main() async {
   await Hive.initFlutter();
   //初始化服务
   await initServices();
+  // Kick 接口会被浏览器指纹风控，注册 WebView 内核兜底抓取器
+  KickWebFetcher.register();
   // 强制横屏
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeRight,
