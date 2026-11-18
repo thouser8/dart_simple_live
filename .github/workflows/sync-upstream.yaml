@@ -1,0 +1,53 @@
+name: Sync Upstream (同步上游)
+
+# 定期把上游作者仓库 SlotSun/dart_simple_live 的 master 更新合并进来。
+#
+# 设计原则：只在「能干净合并」时才动你的仓库。
+#   - 合并成功 → 自动 push 到 master
+#   - 合并冲突 → 自动 merge --abort，仓库保持原样，只报错提醒手动处理
+#
+# 你自己的文件（Kick 源码、scripts/kick_patch/、My-TV-Build.yaml、
+# tv-banner-guard.yml）都是新增文件，上游没有同名文件，不会被覆盖也不会冲突。
+on:
+  schedule:
+    - cron: "0 3 * * 1" # 每周一 03:00 (UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. 签出本仓库
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 2. 合并上游
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          UPSTREAM_URL="https://github.com/SlotSun/dart_simple_live.git"
+          git remote add upstream "$UPSTREAM_URL" 2>/dev/null || git remote set-url upstream "$UPSTREAM_URL"
+          git fetch upstream master
+
+          BEFORE=$(git rev-parse HEAD)
+          echo "### 上游同步" >> "$GITHUB_STEP_SUMMARY"
+
+          if git merge --no-edit upstream/master; then
+            if [ "$(git rev-parse HEAD)" = "$BEFORE" ]; then
+              echo "上游没有新提交，无需同步。" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              git push origin HEAD:master
+              echo "已合并并推送上游更新：$BEFORE → $(git rev-parse --short HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            git merge --abort
+            echo "::error::上游改动与本地修改发生冲突，已自动放弃本次合并，仓库未被改动。请在本机手动解决：git fetch upstream && git merge upstream/master"
+            echo "**冲突**：本次合并已放弃，仓库保持原样。" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
