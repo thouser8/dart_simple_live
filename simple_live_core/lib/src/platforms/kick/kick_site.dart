@@ -134,7 +134,8 @@ static Future<dynamic> _request(
       }
     }
     throw CoreError(
-      "Kick 接口返回 $code：${_snippet(resp.data)}  ← $url",
+      "Kick 接口返回 $code：${_snippet(resp.data)}  ← $url"
+      "${webFetch == null ? "" : "（已尝试改用浏览器内核发起请求，仍被拦截）"}",
     );
   }
 
