@@ -16,6 +16,8 @@ import 'package:simple_live_app/modules/mine/account/account_controller.dart';
 import 'package:simple_live_app/modules/mine/account/account_page.dart';
 import 'package:simple_live_app/modules/mine/account/bilibili/web_login_controller.dart';
 import 'package:simple_live_app/modules/mine/account/bilibili/web_login_page.dart';
+import 'package:simple_live_app/modules/mine/account/kick/web_login_controller.dart';
+import 'package:simple_live_app/modules/mine/account/kick/web_login_page.dart';
 import 'package:simple_live_app/modules/mine/account/qr_login/qr_login_controller.dart';
 import 'package:simple_live_app/modules/mine/account/qr_login/qr_login_page.dart';
 import 'package:simple_live_app/modules/mine/history/history_controller.dart';
@@ -165,6 +167,14 @@ class AppPages {
       page: () => const BiliBiliWebLoginPage(),
       bindings: [
         BindingsBuilder.put(() => BiliBiliWebLoginController()),
+      ],
+    ),
+    //Kick Web登录
+    GetPage(
+      name: RoutePath.kKickWebLogin,
+      page: () => const KickWebLoginPage(),
+      bindings: [
+        BindingsBuilder.put(() => KickWebLoginController()),
       ],
     ),
     //二维码登录

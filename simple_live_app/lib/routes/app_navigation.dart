@@ -35,6 +35,11 @@ class AppNavigator {
     Get.toNamed(RoutePath.kBiliBiliWebLogin, arguments: account);
   }
 
+  /// 跳转至 Kick 网页登录
+  static Future toKickWebLogin({required Account account}) async {
+    Get.toNamed(RoutePath.kKickWebLogin, arguments: account);
+  }
+
   /// 跳转至哔哩哔哩登录
   static Future toBiliBiliLogin() async {
     if (Platform.isAndroid || Platform.isIOS) {

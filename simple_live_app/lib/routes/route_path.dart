@@ -63,6 +63,9 @@ class RoutePath {
   /// BiliBili 二维码登录
   static const kBiliBiliQRLogin = "/settings/account/bilibili/qr_login";
 
+  /// Kick Web登录
+  static const kKickWebLogin = "/settings/account/kick/web_login";
+
   /// 二维码登录
   static const kAccountQRLogin = "/settings/account/qr_login/qr_login";
 

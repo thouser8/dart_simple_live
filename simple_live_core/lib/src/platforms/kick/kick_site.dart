@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:simple_live_core/simple_live_core.dart';
 import 'package:simple_live_core/src/common/http_client.dart';
@@ -45,8 +46,98 @@ class KickSite implements LiveSite {
         'origin': baseUrl,
       };
 
+  /// 登录后的 cookie（session_token 等），未登录时为空
+  String _cookie = "";
+
+  /// 实时聊天服务所在的站点，和主站不是同一个域名
+  static const realtimeBaseUrl = "https://web.kick.com/api/v1";
+
   @override
-  LiveDanmaku getDanmaku() => KickDanmaku();
+  LiveDanmaku getDanmaku() => KickDanmaku(cookie: _cookie);
+
+  /// 带登录态的请求头，未登录时等于普通 headers
+  Map<String, String> get _authHeaders {
+    var token = pickCookie(_cookie, "session_token");
+    return {
+      ...headers,
+      if (_cookie.isNotEmpty) 'cookie': _cookie,
+      if (token.isNotEmpty) 'authorization': 'Bearer $token',
+    };
+  }
+
+  /// 从 cookie 字符串里取某个字段
+  static String pickCookie(String cookie, String name) {
+    if (cookie.isEmpty) {
+      return "";
+    }
+    for (var item in cookie.split(";")) {
+      var kv = item.split("=");
+      if (kv.length >= 2 && kv.first.trim() == name) {
+        return kv.sublist(1).join("=").trim();
+      }
+    }
+    return "";
+  }
+
+  /// 取频道聊天室当前使用的 Pusher 配置
+  ///
+  /// Kick 网页端先声明自己支持哪些实时厂商，服务端再下发对应的连接参数。
+  /// 这里只要 pusher，就能拿到 `app_key` + `cluster`，用它连标准 Pusher 通道收弹幕。
+  static Future<Map<String, dynamic>> getPusherConfig({
+    required String chatroomId,
+    String cookie = "",
+  }) async {
+    var response = await HttpClient.instance.postJson(
+      "$realtimeBaseUrl/realtime/channels/$chatroomId/chat/connection",
+      data: {
+        "client": {
+          "id": _clientId(),
+          "type": "web",
+        },
+        "capabilities": {
+          "accepted_providers": [
+            {"provider": "pusher"}
+          ]
+        }
+      },
+      header: {
+        'user-agent': defaultUa,
+        'accept': 'application/json, text/plain, */*',
+        'accept-language': 'en-US,en;q=0.9',
+        'content-type': 'application/json',
+        'x-app-platform': 'web',
+        'referer': "$baseUrl/",
+        'origin': baseUrl,
+        if (cookie.isNotEmpty) 'cookie': cookie,
+      },
+    );
+
+    if (response is! Map) {
+      throw Exception("Kick 实时通道配置解析失败");
+    }
+    var connections = response["data"]?["connections"];
+    if (connections is List && connections.isNotEmpty) {
+      var first = connections.first;
+      if (first is Map && first["credentials"] is Map) {
+        return Map<String, dynamic>.from(first["credentials"]);
+      }
+    }
+    throw Exception("Kick 未返回可用的实时通道");
+  }
+
+  /// 生成一个随机客户端 ID，服务端只要求形如 UUID，用来做连接标识
+  static String _clientId() {
+    var random = Random();
+    String seg(int len) {
+      var sb = StringBuffer();
+      for (var i = 0; i < len; i++) {
+        sb.write(random.nextInt(16).toRadixString(16));
+      }
+      return sb.toString();
+    }
+
+    return "${seg(8)}-${seg(4)}-4${seg(3)}-a${seg(3)}-${seg(12)}";
+  }
 
   /// 读取频道详情（原始数据）
   Future<KickChannel> getChannel(String slug) async {
@@ -164,7 +255,7 @@ class KickSite implements LiveSite {
       url: "$baseUrl/${channel.slug.isEmpty ? roomId : channel.slug}",
       introduction: channel.user?.bio ?? "",
       notice: "",
-      danmakuData: channel.chatroomId,
+      danmakuData: channel.chatroomId > 0 ? channel.chatroomId : null,
       data: null,
     );
   }
@@ -270,22 +361,97 @@ class KickSite implements LiveSite {
 
   @override
   void setSiteAttrs(String data) {
-    // Kick 播放与弹幕都不需要 cookie / token
+    if (data.trim().isEmpty) {
+      return;
+    }
+    try {
+      var map = jsonDecode(data);
+      if (map is Map && map['cookie'] is String) {
+        _cookie = (map['cookie'] as String).trim();
+      }
+    } catch (_) {
+      // credential 不是合法 json 时按未登录处理
+    }
+  }
+
+  /// 校验登录态并读取账号资料
+  ///
+  /// credential 形如 `{"cookie":"session_token=xxx; ..."}`。
+  /// Kick 网页端把 `session_token` 放在 cookie 里，同时也会把它当 Bearer token 发，
+  /// 这里两种都带上；用 `/api/v2/channels/followed` 判断登录是否有效
+  /// （未登录固定返回 401，有效登录返回 200）。
+  @override
+  Future<AccountInfo> getAccountInfo({required String credential}) async {
+    var info = AccountInfo();
+    Map<String, dynamic> map;
+    try {
+      var decoded = jsonDecode(credential);
+      if (decoded is! Map) return info;
+      map = Map<String, dynamic>.from(decoded);
+    } catch (e) {
+      return info;
+    }
+    var cookie = (map['cookie'] ?? '').toString().trim();
+    if (cookie.isEmpty) {
+      return info;
+    }
+    setSiteAttrs(credential);
+
+    try {
+      await HttpClient.instance.getJson(
+        "$baseApiUrl/channels/followed",
+        queryParameters: {"page": 1, "limit": 1},
+        header: _authHeaders,
+      );
+    } catch (e) {
+      CoreLog.w("kick 登录校验失败：$e");
+      return info;
+    }
+
+    String? name;
+    String? avatar;
+    String? uid;
+    try {
+      var user = await HttpClient.instance.getJson(
+        "$baseUrl/api/v1/user",
+        header: _authHeaders,
+      );
+      var node = user;
+      if (node is Map && node['data'] is Map) {
+        node = node['data'];
+      }
+      if (node is Map && node['user'] is Map) {
+        node = node['user'];
+      }
+      if (node is Map) {
+        name = (node['username'] ?? node['name'] ?? node['slug'])?.toString();
+        avatar = (node['profile_pic'] ?? node['profile_pic_url'] ?? node['avatar'])
+            ?.toString();
+        uid = (node['id'] ?? node['uuid'])?.toString();
+      }
+    } catch (e) {
+      CoreLog.w("kick 读取账号资料失败：$e");
+    }
+
+    return AccountInfo(
+      name: (name == null || name.isEmpty) ? null : name,
+      avatar: (avatar == null || avatar.isEmpty) ? null : avatar,
+      uid: (uid == null || uid.isEmpty) ? null : uid,
+      credential: credential,
+      isValid: true,
+    );
+  }
+
+  /// Kick 没有扫码登录（网页端只提供邮箱密码 + 第三方 OAuth），
+  /// 所以这里不做二维码，App 侧走「网页登录 + 自动取 cookie」。
+  @override
+  Future<QRCode> getQRCode() async {
+    return QRCode(key: "", url: "");
   }
 
   @override
-  Future<AccountInfo> getAccountInfo({required String credential}) {
-    throw UnimplementedError("kick暂不支持登录");
-  }
-
-  @override
-  Future<QRCode> getQRCode() {
-    throw UnimplementedError("kick暂不支持扫码登录");
-  }
-
-  @override
-  Future<QRPollResult> getQRPollResult({required String qrcodeKey}) {
-    throw UnimplementedError("kick暂不支持扫码登录");
+  Future<QRPollResult> getQRPollResult({required String qrcodeKey}) async {
+    return QRPollResult(status: QRStatus.failed, message: "Kick 不支持扫码登录");
   }
 }
 

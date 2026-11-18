@@ -10,6 +10,7 @@ import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/models/db/account.dart';
 import 'package:simple_live_app/requests/common_request.dart';
+import 'package:simple_live_app/services/db_service.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
 import 'package:simple_live_app/services/safe_service.dart';
 import 'package:simple_live_core/simple_live_core.dart';
@@ -22,6 +23,7 @@ class PlatformService extends GetxService {
   RxList<Account> accountList = RxList();
 
   Future<void> _initAccount() async {
+    await _ensureLoginAccounts();
     accountList.value = await SafeService.instance.getDecodeAccounts();
     // 加密模式, 未登录->跳过cookie使用/登录->解码
     if (AppSettingsController.instance.appSafeEnable.value && !AppSettingsController.instance.appStoreKey.value) {
@@ -29,7 +31,36 @@ class PlatformService extends GetxService {
     }
     // 自动更新
     for (var account in accountList) {
+      // 从未登录过的平台不必每次都去校验，否则启动时会一直弹「账号失效」
+      if (account.credential.trim().isEmpty) {
+        continue;
+      }
       accountLogin(account);
+    }
+  }
+
+  /// 保证「支持登录」的平台都在账号列表里有一条记录
+  ///
+  /// 早期版本的账号记录只有 B 站/斗鱼/抖音，后加的平台（如 Kick）没有记录，
+  /// 账号页就不会出现对应卡片，这里在启动时补齐。
+  Future<void> _ensureLoginAccounts() async {
+    var exist = DBService.instance.getAllAccounts().map((e) => e.siteId).toSet();
+    var now = DateTime.now().millisecondsSinceEpoch;
+    var defaults = <Account>[
+      if (!exist.contains(Constant.kKick))
+        Account(
+          id: 'kick',
+          siteId: Constant.kKick,
+          credential: '',
+          isActive: false,
+          supportCookieLogin: true,
+          supportWebLogin: true,
+          createdAt: now,
+          updatedAt: now,
+        ),
+    ];
+    for (var ac in defaults) {
+      await DBService.instance.addAccount(ac);
     }
   }
 

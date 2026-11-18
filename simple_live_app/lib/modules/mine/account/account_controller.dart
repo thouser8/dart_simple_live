@@ -42,11 +42,19 @@ class AccountController extends GetxController {
             child: ListTile(
               leading: const Icon(Icons.account_circle_outlined),
               title: const Text("Web登录"),
-              subtitle: const Text("填写用户名密码登录"),
+              subtitle: Text(
+                site.id == Constant.kKick
+                    ? "在内置浏览器里登录 kick.com（邮箱密码 / 第三方账号）"
+                    : "填写用户名密码登录",
+              ),
               trailing: const Icon(Icons.chevron_right),
               onTap: () {
                 Get.back();
-                AppNavigator.toBiliBiliWebLogin(account: account);
+                if (site.id == Constant.kKick) {
+                  AppNavigator.toKickWebLogin(account: account);
+                } else {
+                  AppNavigator.toBiliBiliWebLogin(account: account);
+                }
               },
             ),
           ),
@@ -84,7 +92,9 @@ class AccountController extends GetxController {
         TextEditItem(
           value: '',
           label: 'cookie',
-          hintText: 'dy_did=...; acf_did=...;etc',
+          hintText: site.id == Constant.kKick
+              ? 'session_token=...'
+              : 'dy_did=...; acf_did=...;etc',
           key: 'cookie',
         ),
         if (site.id == Constant.kDouyu) ...[
