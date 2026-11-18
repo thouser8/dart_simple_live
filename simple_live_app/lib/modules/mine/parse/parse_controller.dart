@@ -19,8 +19,10 @@ class ParseController extends GetxController {
     FocusManager.instance.primaryFocus?.unfocus();
 
     var parseResult = await UrlParse.instance.parse(e);
-    if (parseResult.isEmpty || parseResult.first == "") {
-      SmartDialog.showToast("无法解析此链接");
+    if (parseResult.isEmpty ||
+        parseResult.first == null ||
+        parseResult.first.toString().isEmpty) {
+      SmartDialog.showToast("无法解析此链接，Kick 请填 https://kick.com/房间名");
       return;
     }
 
@@ -37,8 +39,11 @@ class ParseController extends GetxController {
       return;
     }
     var parseResult = await UrlParse.instance.parse(e);
-    if (parseResult.isEmpty && parseResult.first == "") {
-      SmartDialog.showToast("无法解析此链接");
+    // 这里原来是 `isEmpty && first == ""`，空列表取 first 会直接抛 RangeError
+    if (parseResult.isEmpty ||
+        parseResult.first == null ||
+        parseResult.first.toString().isEmpty) {
+      SmartDialog.showToast("无法解析此链接，Kick 请填 https://kick.com/房间名");
       return;
     }
     Site site = parseResult[1];
