@@ -52,18 +52,55 @@ class KickSite implements LiveSite {
     'priority': 'u=1, i',
   };
 
-  /// 统一请求：非 2xx 时把服务端返回的正文塞进异常。
-  ///
-  /// 这里故意用 `statusCode: 0`，因为 `CoreError.toString()` 在 statusCode 不为 0 时
-  /// 只会输出「无权限访问资源(403)」这种固定文案，会把诊断信息吞掉。
-  static Future<dynamic> _request(
+/// 浏览器内核兜底抓取器
+///
+/// Kick 边缘节点会按 TLS/HTTP2 指纹判断请求是不是真浏览器。
+/// Dart 自带的 HttpClient 无论怎么改请求头，握手特征都和 Chrome 不一样，
+/// 于是会被返回 `{"error":"Request blocked by security policy."}`（403，且没有 error code）。
+///
+/// 所以允许 App 侧注册一个「跑在系统 WebView 里」的抓取器：
+/// 请求由真实 Chromium 内核发出，指纹、cookie、TLS 全对，等同于用户在浏览器里点开。
+/// 返回响应正文；非 2xx 或失败返回 null，由调用方抛原始错误。
+static KickWebFetch? webFetch;
+
+/// 一旦 WebView 抓取成功过，后续请求直接走它，省掉一次注定被拦的请求
+static bool _preferWebFetch = false;
+
+/// 当前网络下是否需要浏览器内核兜底（用于 UI 提示/调试）
+static bool get blockedByFingerprint => _preferWebFetch;
+
+/// 统一请求：非 2xx 时把服务端返回的正文塞进异常。
+///
+/// 这里故意用 `statusCode: 0`，因为 `CoreError.toString()` 在 statusCode 不为 0 时
+/// 只会输出「无权限访问资源(403)」这种固定文案，会把诊断信息吞掉。
+static Future<dynamic> _request(
     String url, {
     required String method,
     Map<String, dynamic>? query,
     Map<String, String>? header,
     Object? data,
   }) async {
-    Response<dynamic> resp;
+    Response<dynamic>? resp;
+    var headersToUse = Map<String, String>.from(header ?? headers);
+    // 浏览器内核走的是整条 URL，query 得自己拼进去
+    var webUrl = url;
+    if (query != null && query.isNotEmpty) {
+      var uri = Uri.parse(url);
+      webUrl = uri.replace(queryParameters: {
+        ...uri.queryParameters,
+        ...query.map((k, v) => MapEntry(k, v.toString())),
+      }).toString();
+    }
+
+    // 上一轮已经被指纹拦过 → 直接走浏览器内核，不必再撞一次
+    if (_preferWebFetch && webFetch != null) {
+      var viaWeb = await _fetchByWeb(webUrl, method, headersToUse, data);
+      if (viaWeb != null) {
+        return viaWeb;
+      }
+      _preferWebFetch = false;
+    }
+
     try {
       resp = await HttpClient.instance.dio.request(
         url,
@@ -72,11 +109,16 @@ class KickSite implements LiveSite {
         options: Options(
           method: method,
           responseType: ResponseType.json,
-          headers: Map<String, String>.from(header ?? headers),
+          headers: headersToUse,
           validateStatus: (_) => true,
         ),
       );
     } on DioException catch (e) {
+      // 连不上（DNS/连接重置）也试一次浏览器内核，某些网络下只有它通
+      var viaWeb = await _fetchByWeb(webUrl, method, headersToUse, data);
+      if (viaWeb != null) {
+        return viaWeb;
+      }
       throw CoreError("Kick 请求 $url 失败：${e.type.name} ${e.message}");
     }
 
@@ -84,9 +126,71 @@ class KickSite implements LiveSite {
     if (code >= 200 && code < 300) {
       return resp.data;
     }
+    // 403/429/503：大概率是指纹风控，换浏览器内核再试
+    if (code == 403 || code == 1020 || code == 429 || code == 503) {
+      var viaWeb = await _fetchByWeb(webUrl, method, headersToUse, data);
+      if (viaWeb != null) {
+        return viaWeb;
+      }
+    }
     throw CoreError(
       "Kick 接口返回 $code：${_snippet(resp.data)}  ← $url",
     );
+  }
+
+  /// 走 App 注册的浏览器内核抓取器。成功返回解析后的 JSON，失败返回 null
+  static Future<dynamic> _fetchByWeb(
+    String url,
+    String method,
+    Map<String, String> header,
+    Object? data,
+  ) async {
+    var fetcher = webFetch;
+    if (fetcher == null) {
+      return null;
+    }
+    String? body;
+    if (data != null) {
+      if (data is String) {
+        body = data;
+      } else {
+        try {
+          body = jsonEncode(data);
+        } catch (_) {
+          body = null;
+        }
+      }
+    }
+    try {
+      var text = await fetcher(
+        url: url,
+        method: method,
+        headers: header,
+        body: body,
+      );
+      if (text == null) {
+        return null;
+      }
+      var trimmed = text.trim();
+      if (trimmed.isEmpty) {
+        return null;
+      }
+      // 拿到的还是风控文案，说明浏览器内核也被拦（例如 IP 被限），别再重试
+      if (trimmed.startsWith("{") && trimmed.contains("blocked by security")) {
+        CoreLog.w("kick 浏览器内核同样被拦：$trimmed");
+        return null;
+      }
+      if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+        CoreLog.w("kick 浏览器内核返回非 JSON：${_snippet(trimmed)}");
+        return null;
+      }
+      _preferWebFetch = true;
+      CoreLog.i("kick 改用浏览器内核请求成功：$url");
+      return jsonDecode(trimmed);
+    } catch (e) {
+      CoreLog.w("kick 浏览器内核请求失败：$e");
+      return null;
+    }
   }
 
   /// 把响应正文压成一行短文本，避免刷屏
@@ -548,6 +652,18 @@ class KickSite implements LiveSite {
     return QRPollResult(status: QRStatus.failed, message: "Kick 不支持扫码登录");
   }
 }
+
+/// 浏览器内核兜底抓取器
+///
+/// 由 App 侧（WebView）实现并注册到 [KickSite.webFetch]：
+/// 请求从真实的 Chromium 内核发出，TLS/HTTP2 指纹与浏览器一致。
+/// 返回响应正文；任何失败（非 2xx、超时）返回 null。
+typedef KickWebFetch = Future<String?> Function({
+  required String url,
+  required String method,
+  required Map<String, String> headers,
+  String? body,
+});
 
 /// 一条 m3u8 清晰度（内部使用）
 class _KickVariant {

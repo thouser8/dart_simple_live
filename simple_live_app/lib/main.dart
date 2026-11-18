@@ -32,6 +32,7 @@ import 'package:simple_live_app/services/firebase_service.dart' as app;
 import 'package:simple_live_app/services/follow_block_service.dart';
 import 'package:simple_live_app/services/follow_service.dart';
 import 'package:simple_live_app/services/history_service.dart';
+import 'package:simple_live_app/services/kick_web_fetcher.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
 import 'package:simple_live_app/services/migration_service.dart';
 import 'package:simple_live_app/services/platform_service.dart';
@@ -73,6 +74,10 @@ void main(List<String> arguments) async {
   );
   //初始化服务
   await initServices();
+  // Kick 接口会被浏览器指纹风控，注册 WebView 兜底抓取器（仅移动端有 WebView）
+  if (Platform.isAndroid || Platform.isIOS) {
+    KickWebFetcher.register();
+  }
   await initWindow();
 
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
