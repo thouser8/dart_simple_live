@@ -47,10 +47,7 @@ env:
 
 jobs:
   build-tv:
-    # Android 包用 Linux 跑就行：macOS 队列经常排不到（这次就是排队 15 分钟被取消），
-    # 而且 macOS 分钟数按 10 倍计费。build-kick-apk.yaml 同样跑在 ubuntu 上。
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    runs-on: macos-latest
     steps:
       - name: 1. 签出源码（自动取作者最新）
         uses: actions/checkout@v7
@@ -281,12 +278,18 @@ jobs:
         with:
           path: assets/tv_app_version.json
 
+      # tag 带上构建时间：原来只用 pubspec 里的版本号，同版本重打包会覆盖旧 Release，
+      # 之前就把 tv_v1.5.1 的原版包覆盖过。带上时间后每包独立，随时能回滚。
+      - name: 10.1 生成构建时间戳
+        id: stamp
+        run: echo "d=$(date -u +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
+
       - name: 11. 发布到 Releases
         uses: softprops/action-gh-release@v3
         with:
           repository: ${{ github.repository }}
-          tag_name: "tv_v${{ fromJson(steps.version.outputs.content).version }}"
-          name: "TV ${{ fromJson(steps.version.outputs.content).version }}"
+          tag_name: "tv_v${{ fromJson(steps.version.outputs.content).version }}-${{ steps.stamp.outputs.d }}"
+          name: "TV ${{ fromJson(steps.version.outputs.content).version }} (${{ steps.stamp.outputs.d }})"
           body: |
             # Android TV
             ${{ fromJson(steps.version.outputs.content).version_desc }}
