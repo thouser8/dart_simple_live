@@ -538,6 +538,34 @@ static Future<dynamic> _request(
         ));
       }
     }
+
+    // 搜索接口偶尔搜不到具体频道（尤其是直接输 slug），
+    // 这时按「房间号/频道名」直接查一次频道详情，让用户可以输入房间名直达
+    if (items.isEmpty) {
+      var slug = keyword.trim();
+      // 用户可能粘的是整条链接，取最后一段
+      if (slug.contains("/")) {
+        var parts = slug.split("/").where((e) => e.trim().isNotEmpty).toList();
+        if (parts.isNotEmpty) {
+          slug = parts.last.trim();
+        }
+      }
+      if (slug.isNotEmpty) {
+        try {
+          var channel = await getChannel(slug);
+          if (channel.slug.isNotEmpty && !channel.isBanned) {
+            items.add(LiveAnchorItem(
+              roomId: channel.slug,
+              avatar: channel.user?.profilePic ?? "",
+              userName: channel.user?.username ?? channel.slug,
+              liveStatus: channel.isLive,
+            ));
+          }
+        } catch (e) {
+          CoreLog.w("kick 直接查询频道 $slug 失败：$e");
+        }
+      }
+    }
     return LiveSearchAnchorResult(hasMore: false, items: items);
   }
 
