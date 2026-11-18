@@ -47,7 +47,10 @@ env:
 
 jobs:
   build-tv:
-    runs-on: macos-latest
+    # Android 包用 Linux 跑就行：macOS 队列经常排不到（这次就是排队 15 分钟被取消），
+    # 而且 macOS 分钟数按 10 倍计费。build-kick-apk.yaml 同样跑在 ubuntu 上。
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: 1. 签出源码（自动取作者最新）
         uses: actions/checkout@v7
