@@ -14,6 +14,8 @@ class UrlParse {
   /// 链接解析工具
   Future<List> parse(String url) async {
     var id = "";
+    // 粘贴时经常带空格、换行，先清掉
+    url = url.trim();
     if (url.contains("bilibili.com")) {
       var regExp = RegExp(r"bilibili\.com/([\d|\w]+)");
       id = regExp.firstMatch(url)?.group(1) ?? "";
@@ -60,13 +62,13 @@ class UrlParse {
       id = regExp.firstMatch(url)?.group(1) ?? "";
       return [id, Sites.allSites[Constant.kTwitch]!];
     }
-    // 注意要排除掉 kick.com/api/... 之类，不过用户粘贴的一般是频道页
-    if (url.contains("kick.com/") && !url.contains("kick.com/api")) {
-      final regExp = RegExp(r'kick\.com/([^/?]+)');
-      id = regExp.firstMatch(url)?.group(1) ?? "";
-      // 频道页可能带 /chat、/videos 等子路径，只取第一段
-      id = id.split("/").first;
-      return [id, Sites.allSites[Constant.kKick]!];
+    // Kick：频道页 https://kick.com/{slug}
+    // 也接受接口地址 https://kick.com/api/v2/channels/{slug}
+    if (url.contains("kick.com")) {
+      id = _parseKickId(url);
+      if (id.isNotEmpty) {
+        return [id, Sites.allSites[Constant.kKick]!];
+      }
     }
     if (url.contains("v.douyin.com")) {
       var regExp = RegExp(r"http.?://v.douyin.com/[\d\w]+/");
@@ -76,6 +78,65 @@ class UrlParse {
     }
 
     return [];
+  }
+
+  /// Kick 的一级路径，这些不是房间名
+  static const _kickReserved = {
+    "api",
+    "categories",
+    "category",
+    "browse",
+    "following",
+    "followers",
+    "search",
+    "login",
+    "signup",
+    "register",
+    "settings",
+    "messages",
+    "dashboard",
+    "video",
+    "videos",
+    "popular",
+    "help",
+    "about",
+    "terms",
+    "privacy",
+    "clip",
+    "clips",
+    "subscriptions",
+  };
+
+  /// 从 Kick 链接里取频道 slug
+  ///
+  /// 支持三种写法：
+  /// * `https://kick.com/quin3614`
+  /// * `https://kick.com/quin3614/chat`
+  /// * `https://kick.com/api/v2/channels/quin3614`（接口地址，容易被直接粘贴）
+  static String _parseKickId(String url) {
+    var text = url.trim();
+
+    // 接口地址优先：/api/v2/channels/{slug}
+    var apiMatch =
+        RegExp(r'kick\.com/api/v\d+/channels/([^/?#\s]+)').firstMatch(text);
+    if (apiMatch != null) {
+      return apiMatch.group(1) ?? "";
+    }
+
+    // 频道页：取 kick.com 之后的第一段
+    var pageMatch = RegExp(r'kick\.com/([^/?#\s]+)').firstMatch(text);
+    var seg = pageMatch?.group(1) ?? "";
+    if (seg.isEmpty) {
+      return "";
+    }
+    if (_kickReserved.contains(seg.toLowerCase())) {
+      return "";
+    }
+    // 频道名里不会带 .m3u8 之类，防止把播放直链当成房间号
+    if (seg.contains(".m3u8") || seg.contains(".mp4")) {
+      return "";
+    }
+    return seg;
   }
 
   Future<String> _getLocation(String url) async {
