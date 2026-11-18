@@ -35,6 +35,7 @@ class Constant {
   static const String kHuya = "huya";
   static const String kDouyin = "douyin";
   static const String kTwitch = "twitch";
+  static const String kKick = "kick";
 }
 
 class HomePageItem {

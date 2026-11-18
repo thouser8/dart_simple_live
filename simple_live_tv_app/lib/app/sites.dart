@@ -31,6 +31,13 @@ class Sites {
       liveSite: DouyinSite(),
       index: 3,
     ),
+    "kick": Site(
+      id: "kick",
+      logo: "assets/images/kick.png",
+      name: "Kick",
+      liveSite: KickSite(),
+      index: 4,
+    ),
   };
 
   static List<Site> get supportSites {

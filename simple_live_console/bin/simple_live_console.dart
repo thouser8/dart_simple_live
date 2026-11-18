@@ -116,5 +116,9 @@ List parseUrl(String url) {
         RegExp(r"live\.douyin\.com/([\d|\w]+)").firstMatch(url)?.group(1) ?? "";
     return [DouyinSite(), id];
   }
+  if (url.contains("kick.com/")) {
+    var id = RegExp(r"kick\.com/([^/?]+)").firstMatch(url)?.group(1) ?? "";
+    return [KickSite(), id];
+  }
   throw Exception("链接解析失败");
 }

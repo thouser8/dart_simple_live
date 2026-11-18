@@ -60,6 +60,14 @@ class UrlParse {
       id = regExp.firstMatch(url)?.group(1) ?? "";
       return [id, Sites.allSites[Constant.kTwitch]!];
     }
+    // 注意要排除掉 kick.com/api/... 之类，不过用户粘贴的一般是频道页
+    if (url.contains("kick.com/") && !url.contains("kick.com/api")) {
+      final regExp = RegExp(r'kick\.com/([^/?]+)');
+      id = regExp.firstMatch(url)?.group(1) ?? "";
+      // 频道页可能带 /chat、/videos 等子路径，只取第一段
+      id = id.split("/").first;
+      return [id, Sites.allSites[Constant.kKick]!];
+    }
     if (url.contains("v.douyin.com")) {
       var regExp = RegExp(r"http.?://v.douyin.com/[\d\w]+/");
       var u = regExp.firstMatch(url)?.group(0) ?? "";

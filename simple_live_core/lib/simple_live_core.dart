@@ -7,6 +7,7 @@ export 'src/platforms/bilibili/bilibili_site.dart';
 export 'src/platforms/douyu/douyu_site.dart';
 export 'src/platforms/douyin/douyin_site.dart';
 export 'src/platforms/twitch/twitch_site.dart';
+export 'src/platforms/kick/kick_site.dart';
 export 'src/common/core_log.dart';
 export 'src/common/qr_status.dart';
 export 'src/model/live_message.dart';

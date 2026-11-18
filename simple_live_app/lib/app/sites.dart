@@ -41,6 +41,13 @@ class Sites {
       logo: "assets/images/Twitch.png",
       name: "Twitch",
       liveSite: TwitchSite(),
+    ),
+    Constant.kKick: Site(
+      id: Constant.kKick,
+      iconData: RemixIcons.live_line,
+      logo: "assets/images/kick.png",
+      name: "Kick",
+      liveSite: KickSite(),
     )
   };
 
