@@ -397,15 +397,17 @@ class KickSite implements LiveSite {
     }
     setSiteAttrs(credential);
 
+    // 先看关注列表能不能拿到：未登录固定 401，登录后 200
+    var valid = false;
     try {
       await HttpClient.instance.getJson(
         "$baseApiUrl/channels/followed",
         queryParameters: {"page": 1, "limit": 1},
         header: _authHeaders,
       );
+      valid = true;
     } catch (e) {
-      CoreLog.w("kick 登录校验失败：$e");
-      return info;
+      CoreLog.w("kick 关注列表校验失败：$e");
     }
 
     String? name;
@@ -433,12 +435,20 @@ class KickSite implements LiveSite {
       CoreLog.w("kick 读取账号资料失败：$e");
     }
 
+    // 关注列表接口万一被限流/改动，能读到用户资料也说明登录态可用
+    if (!valid && (name != null && name.isNotEmpty)) {
+      valid = true;
+    }
+    if (!valid) {
+      return info;
+    }
+
     return AccountInfo(
       name: (name == null || name.isEmpty) ? null : name,
       avatar: (avatar == null || avatar.isEmpty) ? null : avatar,
       uid: (uid == null || uid.isEmpty) ? null : uid,
       credential: credential,
-      isValid: true,
+      isValid: valid,
     );
   }
 
