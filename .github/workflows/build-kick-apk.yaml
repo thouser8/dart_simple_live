@@ -1,0 +1,67 @@
+name: Build APK (no secrets needed)
+
+# 这个流程不依赖任何仓库 Secret，任何人都能一键编出能装的 APK。
+# 手动触发：仓库页面 -> Actions -> 左侧 "Build APK (no secrets needed)" -> Run workflow
+on:
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: "zulu"
+          java-version: "17"
+          cache: "gradle"
+          cache-dependency-path: |
+            simple_live_app/android/*.gradle*
+            simple_live_app/android/**/gradle-wrapper.properties
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2.16.0
+        with:
+          channel: stable
+          flutter-version-file: simple_live_app/pubspec.yaml
+          cache: true
+
+      # 项目 build.gradle.kts 会强制读取 android/key.properties，
+      # 缺文件会直接构建失败。这里现场生成一个临时签名，不需要仓库 Secret。
+      - name: Create temporary signing key
+        run: |
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/keystore.jks" \
+            -storetype JKS \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias slive \
+            -storepass slive123456 -keypass slive123456 \
+            -dname "CN=Slive Dev, OU=Dev, O=Dev, L=NA, ST=NA, C=CN"
+          printf 'storeFile=%s\nstorePassword=slive123456\nkeyPassword=slive123456\nkeyAlias=slive\n' \
+            "$RUNNER_TEMP/keystore.jks" > simple_live_app/android/key.properties
+
+      - name: Install Rust targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+
+      - name: Restore packages
+        run: |
+          cd simple_live_app
+          flutter pub get
+
+      - name: Build APK
+        run: |
+          cd simple_live_app
+          flutter build apk --release --split-per-abi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: kick-apk
+          path: simple_live_app/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
