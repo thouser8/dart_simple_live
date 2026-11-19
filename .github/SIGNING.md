@@ -9,13 +9,14 @@
 
 | 仓库 | 端 | 自建版包名 | 官方原版包名 | 显示名 |
 | --- | --- | --- | --- | --- |
-| 仓库1 | 手机 | `com.slotsun.slive.my` | `com.slotsun.slive` | Simple Live 自建版 |
-| 仓库1 | TV | `com.xycz.simple_live_tv.my` | `com.xycz.simple_live_tv` | Simple Live TV 自建版 |
-| 仓库2 | 手机 | `com.xycz.simple_live.june` | `com.xycz.simple_live` | Simple Live 自建版 |
-| 仓库2 | TV | `com.xycz.simple_live_tv.june` | `com.xycz.simple_live_tv` | Simple Live TV 自建版 |
+| 仓库1 | 手机 | `com.slotsun.slive.my` | `com.slotsun.slive` | **Slive X** |
+| 仓库1 | TV | `com.xycz.simple_live_tv.my` | `com.xycz.simple_live_tv` | **Simple Live TV X** |
+| 仓库2 | 手机 | `com.xycz.simple_live.june` | `com.xycz.simple_live` | **Simple Live Y** |
+| 仓库2 | TV | `com.xycz.simple_live_tv.june` | `com.xycz.simple_live_tv` | **Simple Live TV Y** |
 
-后缀 `.my` / `.june` 写在对应 workflow 的「应用自定义设置」步骤里，构建时临时
-改写，**不改仓库里的 `build.gradle.kts`**，所以同步上游不会冲突。
+后缀 `.my` / `.june` 和显示名 X / Y 都写在对应 workflow 的「应用自定义设置」步骤里，
+构建时临时改写，**不改仓库里的 `build.gradle.kts` 和 `AndroidManifest.xml`**，
+所以同步上游不会冲突、也不会被上游覆盖。
 
 ## 签名为什么不会被上游覆盖
 
