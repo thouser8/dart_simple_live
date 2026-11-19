@@ -89,6 +89,22 @@ jobs:
           perl -pi -e 's{android:label="[^"]*"}{android:label="$ENV{APP_LABEL}"}' android/app/src/main/AndroidManifest.xml
           echo "最终显示名：$(sed -n 's/.*android:label="\(.*\)".*/\1/p' android/app/src/main/AndroidManifest.xml | head -1)"
 
+          # 工程带了 Firebase（Analytics / Crashlytics），google-services 插件会校验
+          # applicationId 与 google-services.json 里的 package_name 是否一致，
+          # 不一致会直接构建失败（No matching client found）。这里把 json 里的
+          # 包名同步加上同一个后缀。
+          # 注意：Firebase 项目里登记的还是原包名，所以统计/崩溃上报可能被拒，
+          # 但 App 本身功能不受影响。这是「与原版共存」必须付出的代价。
+          if [ -f android/app/google-services.json ]; then
+            jq --arg sfx "$APP_ID_SUFFIX" '
+              (.client[]?.client_info.android_client_info.package_name) |=
+                (if type == "string" and (endswith($sfx) | not) then . + $sfx else . end)
+            ' android/app/google-services.json > /tmp/gs.json
+            mv /tmp/gs.json android/app/google-services.json
+            echo "google-services.json 已同步改包名："
+            grep -c "$APP_ID_SUFFIX" android/app/google-services.json
+          fi
+
       - name: 7. 安装依赖
         run: |
           cd simple_live_app
