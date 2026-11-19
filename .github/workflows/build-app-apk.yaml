@@ -1,0 +1,165 @@
+# =============================================================================
+#  Build APP APK —— 手机版，构建后自动发邮件通知
+#
+#  包名 com.slotsun.slive.my（上游原版是 com.slotsun.slive）
+#    → 可以和官方原版同时安装、互不覆盖
+#  后缀只在这一步临时改写构建产物，不改仓库里的 build.gradle.kts，
+#  所以同步上游不会冲突。
+#
+#  签名复用仓库已有的 TV_KEYSTORE_* 那 4 个 Secret（没有就退回临时签名）。
+#  邮件通知需要 MAIL_TO / SMTP_HOST / SMTP_USER / SMTP_PASS 四个 Secret，
+#  没配就跳过邮件，不影响出包。
+# =============================================================================
+name: Build APP APK (手机端)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: 1. 签出源码
+        uses: actions/checkout@v7
+
+      - name: 2. 设置 Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: "17"
+          cache: gradle
+
+      - name: 3. 设置 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: simple_live_app/pubspec.yaml
+          cache: true
+
+      - name: 4. 安装 Rust 目标
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+
+      # 签名：配置了 4 个 Secret 就用你自己的固定密钥；没有就用临时签名
+      - name: 5. 准备签名
+        env:
+          KEYSTORE_B64: ${{ secrets.TV_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.TV_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.TV_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.TV_KEY_ALIAS }}
+        run: |
+          set -e
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/keystore.jks"
+            echo "使用仓库 Secret 中的固定签名"
+            printf 'storeFile=%s\nstorePassword=%s\nkeyPassword=%s\nkeyAlias=%s\n' \
+              "$RUNNER_TEMP/keystore.jks" "$STORE_PASSWORD" "$KEY_PASSWORD" "$KEY_ALIAS" \
+              > simple_live_app/android/key.properties
+          else
+            echo "::warning::未配置 TV_KEYSTORE_BASE64，改用临时签名：安装前需先卸载旧版"
+            keytool -genkeypair -v \
+              -keystore "$RUNNER_TEMP/keystore.jks" \
+              -storetype JKS -keyalg RSA -keysize 2048 -validity 10000 \
+              -alias slive -storepass slive123456 -keypass slive123456 \
+              -dname "CN=Slive Dev, OU=Dev, O=Dev, L=NA, ST=NA, C=CN"
+            printf 'storeFile=%s\nstorePassword=slive123456\nkeyPassword=slive123456\nkeyAlias=slive\n' \
+              "$RUNNER_TEMP/keystore.jks" > simple_live_app/android/key.properties
+          fi
+
+      - name: 6. 应用自定义设置
+        env:
+          APP_ID_SUFFIX: ".my"
+          APP_LABEL: "Simple Live 自建版"
+        run: |
+          set -e
+          cd simple_live_app
+          perl -pi -e 's{(applicationId = ")([^"]*)(")}{my $v=$2; my $s=$ENV{APP_ID_SUFFIX}; $v=~s/(?:\Q$s\E)+\z//; $1.$v.$s.$3}e' android/app/build.gradle.kts
+          VALUE=$(sed -n 's/^[[:space:]]*applicationId = "\(.*\)"[[:space:]]*$/\1/p' android/app/build.gradle.kts | head -1)
+          echo "最终包名：${VALUE:-（未找到）}"
+          if [ -z "$VALUE" ]; then echo "::error::未找到 applicationId"; exit 1; fi
+          case "$VALUE" in
+            *"$APP_ID_SUFFIX") echo "后缀核对无误（只追加了一次）" ;;
+            *) echo "::error::包名不以 $APP_ID_SUFFIX 结尾，已停止"; exit 1 ;;
+          esac
+          perl -pi -e 's{android:label="[^"]*"}{android:label="$ENV{APP_LABEL}"}' android/app/src/main/AndroidManifest.xml
+          echo "最终显示名：$(sed -n 's/.*android:label="\(.*\)".*/\1/p' android/app/src/main/AndroidManifest.xml | head -1)"
+
+      - name: 7. 安装依赖
+        run: |
+          cd simple_live_app
+          flutter pub get
+
+      - name: 8. 读取版本号
+        id: ver
+        run: |
+          V=$(sed -n 's/^version:[[:space:]]*//p' simple_live_app/pubspec.yaml | head -1)
+          echo "v=${V%%+*}" >> "$GITHUB_OUTPUT"
+          echo "构建版本：$V"
+
+      - name: 9. 编译 APK
+        run: |
+          cd simple_live_app
+          flutter build apk --release --split-per-abi
+
+      - name: 10. 保存到 Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-apk
+          path: simple_live_app/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+
+      - name: 11. 生成构建时间戳
+        id: stamp
+        run: echo "d=$(date -u +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
+
+      - name: 12. 发布到 Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "app_v${{ steps.ver.outputs.v }}-${{ steps.stamp.outputs.d }}"
+          name: "手机版 ${{ steps.ver.outputs.v }} (${{ steps.stamp.outputs.d }})"
+          body: |
+            包名：`com.slotsun.slive.my`（可与官方原版共存）
+            构建：${{ steps.stamp.outputs.d }}
+          files: simple_live_app/build/app/outputs/flutter-apk/*.apk
+          fail_on_unmatched_files: true
+
+  notify:
+    needs: build-apk
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查是否配置了邮件
+        id: chk
+        env:
+          TO: ${{ secrets.MAIL_TO }}
+        run: |
+          if [ -n "$TO" ]; then
+            echo "on=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "on=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::未配置 MAIL_TO，跳过邮件通知"
+          fi
+
+      - name: 发送邮件
+        if: steps.chk.outputs.on == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT || 465 }}
+          secure: true
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          subject: "${{ needs.build-apk.result == 'success' && '✅' || '❌' }} Slive 手机版构建${{ needs.build-apk.result == 'success' && '完成' || '失败' }}"
+          to: ${{ secrets.MAIL_TO }}
+          from: "Slive Builder <${{ secrets.SMTP_USER }}>"
+          body: |
+            仓库：${{ github.repository }}
+            目标：Android 手机版（包名 com.slotsun.slive.my）
+            结果：${{ needs.build-apk.result }}
+            下载：${{ github.server_url }}/${{ github.repository }}/releases
+            运行详情：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
