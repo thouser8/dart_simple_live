@@ -63,9 +63,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
+          # 必须显式指定 --repo：本仓库同时挂着 upstream 远端，
+          # 不指定的话 gh 会认成上游仓库，直接 404。
           echo "触发手机版构建"
-          gh workflow run build-app-apk.yaml --ref master
+          gh workflow run build-app-apk.yaml --ref master --repo "$GITHUB_REPOSITORY"
           sleep 3
           echo "触发 TV 版构建"
-          gh workflow run My-TV-Build.yaml --ref master
+          gh workflow run My-TV-Build.yaml --ref master --repo "$GITHUB_REPOSITORY"
           echo "已触发两个构建，完成后会发邮件通知。" | tee -a "$GITHUB_STEP_SUMMARY"
