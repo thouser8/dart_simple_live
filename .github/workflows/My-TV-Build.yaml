@@ -300,3 +300,43 @@ jobs:
             simple_live_tv_app/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
             simple_live_tv_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
             simple_live_tv_app/build/app/outputs/flutter-apk/app-x86_64-release.apk
+
+  # ---------------------------------------------------------------------------
+  #  邮件通知 —— 需要 MAIL_TO / SMTP_HOST / SMTP_USER / SMTP_PASS 四个 Secret，
+  #  没配就静默跳过，不影响出包。
+  # ---------------------------------------------------------------------------
+  notify:
+    needs: build-tv
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查是否配置了邮件
+        id: chk
+        env:
+          TO: ${{ secrets.MAIL_TO }}
+        run: |
+          if [ -n "$TO" ]; then
+            echo "on=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "on=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::未配置 MAIL_TO，跳过邮件通知"
+          fi
+
+      - name: 发送邮件
+        if: steps.chk.outputs.on == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT || 465 }}
+          secure: true
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          subject: "${{ needs.build-tv.result == 'success' && '✅' || '❌' }} Slive TV 版构建${{ needs.build-tv.result == 'success' && '完成' || '失败' }}"
+          to: ${{ secrets.MAIL_TO }}
+          from: "Slive Builder <${{ secrets.SMTP_USER }}>"
+          body: |
+            仓库：${{ github.repository }}
+            目标：Android TV（包名 com.xycz.simple_live_tv.my）
+            结果：${{ needs.build-tv.result }}
+            下载：${{ github.server_url }}/${{ github.repository }}/releases
+            运行详情：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
