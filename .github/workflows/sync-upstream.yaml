@@ -1,20 +1,23 @@
 name: Sync Upstream (同步上游)
 
-# 定期把上游作者仓库 SlotSun/dart_simple_live 的 master 更新合并进来。
+# 定期把上游作者仓库 SlotSun/dart_simple_live 的 master 更新合并进来，
+# 合并成功且确有新内容时，自动触发手机版 + TV 版构建（构建完会发邮件）。
 #
 # 设计原则：只在「能干净合并」时才动你的仓库。
-#   - 合并成功 → 自动 push 到 master
+#   - 合并成功 → 自动 push，然后自动开两个构建
 #   - 合并冲突 → 自动 merge --abort，仓库保持原样，只报错提醒手动处理
 #
-# 你自己的文件（Kick 源码、scripts/kick_patch/、My-TV-Build.yaml、
-# tv-banner-guard.yml）都是新增文件，上游没有同名文件，不会被覆盖也不会冲突。
+# 你自己的文件（Kick 源码、scripts/kick_patch/、build-app-apk.yaml、
+# My-TV-Build.yaml、tv-banner-guard.yml）都是新增文件，上游没有同名文件，
+# 不会被覆盖也不会冲突。签名放在 Secret 里，同步永远碰不到。
 on:
   schedule:
-    - cron: "0 3 * * 1" # 每周一 03:00 (UTC)
+    - cron: "0 3 * * 1" # 每周一 03:00 (UTC) = 北京时间 11:00
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   sync:
@@ -41,9 +44,11 @@ jobs:
           if git merge --no-edit upstream/master; then
             if [ "$(git rev-parse HEAD)" = "$BEFORE" ]; then
               echo "上游没有新提交，无需同步。" | tee -a "$GITHUB_STEP_SUMMARY"
+              echo "CHANGED=false" >> "$GITHUB_ENV"
             else
               git push origin HEAD:master
               echo "已合并并推送上游更新：$BEFORE → $(git rev-parse --short HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
+              echo "CHANGED=true" >> "$GITHUB_ENV"
             fi
           else
             git merge --abort 2>/dev/null || true
@@ -51,3 +56,16 @@ jobs:
             echo "**冲突**：本次合并已放弃，仓库保持原样。" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
+
+      - name: 3. 有新内容就自动开构建
+        if: env.CHANGED == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          echo "触发手机版构建"
+          gh workflow run build-app-apk.yaml --ref master
+          sleep 3
+          echo "触发 TV 版构建"
+          gh workflow run My-TV-Build.yaml --ref master
+          echo "已触发两个构建，完成后会发邮件通知。" | tee -a "$GITHUB_STEP_SUMMARY"
