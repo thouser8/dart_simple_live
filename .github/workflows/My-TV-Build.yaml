@@ -209,7 +209,7 @@ jobs:
       - name: 4. 应用自定义设置
         env:
           APP_ID_SUFFIX: ".my"
-          APP_LABEL: "Simple Live TV 自建版"
+          APP_LABEL: "Simple Live TV X"
         run: |
           cd simple_live_tv_app
           if [ -n "$APP_ID_SUFFIX" ]; then
@@ -331,12 +331,12 @@ jobs:
           secure: true
           username: ${{ secrets.SMTP_USER }}
           password: ${{ secrets.SMTP_PASS }}
-          subject: "${{ needs.build-tv.result == 'success' && '✅' || '❌' }} Slive TV 版构建${{ needs.build-tv.result == 'success' && '完成' || '失败' }}"
+          subject: "${{ needs.build-tv.result == 'success' && '✅' || '❌' }} Simple Live TV X 构建${{ needs.build-tv.result == 'success' && '完成' || '失败' }}"
           to: ${{ secrets.MAIL_TO }}
           from: "Slive Builder <${{ secrets.SMTP_USER }}>"
           body: |
             仓库：${{ github.repository }}
-            目标：Android TV（包名 com.xycz.simple_live_tv.my）
+            目标：Simple Live TV X（Android TV，包名 com.xycz.simple_live_tv.my）
             结果：${{ needs.build-tv.result }}
             下载：${{ github.server_url }}/${{ github.repository }}/releases
             运行详情：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
