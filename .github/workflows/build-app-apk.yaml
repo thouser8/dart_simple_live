@@ -74,7 +74,7 @@ jobs:
       - name: 6. 应用自定义设置
         env:
           APP_ID_SUFFIX: ".my"
-          APP_LABEL: "Simple Live 自建版"
+          APP_LABEL: "Slive X"
         run: |
           set -e
           cd simple_live_app
@@ -170,12 +170,12 @@ jobs:
           secure: true
           username: ${{ secrets.SMTP_USER }}
           password: ${{ secrets.SMTP_PASS }}
-          subject: "${{ needs.build-apk.result == 'success' && '✅' || '❌' }} Slive 手机版构建${{ needs.build-apk.result == 'success' && '完成' || '失败' }}"
+          subject: "${{ needs.build-apk.result == 'success' && '✅' || '❌' }} Slive X 手机版构建${{ needs.build-apk.result == 'success' && '完成' || '失败' }}"
           to: ${{ secrets.MAIL_TO }}
           from: "Slive Builder <${{ secrets.SMTP_USER }}>"
           body: |
             仓库：${{ github.repository }}
-            目标：Android 手机版（包名 com.slotsun.slive.my）
+            目标：Slive X（Android 手机版，包名 com.slotsun.slive.my）
             结果：${{ needs.build-apk.result }}
             下载：${{ github.server_url }}/${{ github.repository }}/releases
             运行详情：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
